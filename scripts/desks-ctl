@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# Unified Desks control script: installs, removes, and drives the Hyprland side.
+set -euo pipefail
+
+PLUGIN_ID="io.github.azcoov.unified-desks"
+PLUGIN_DIR="${HOME}/.config/omarchy/plugins/${PLUGIN_ID}"
+HYPR_DIR="${HOME}/.config/hypr"
+STATE_DIR="${HOME}/.local/state/${PLUGIN_ID}"
+TARGET_LUA="${HYPR_DIR}/unified-desks.lua"
+HYPRLAND_LUA="${HYPR_DIR}/hyprland.lua"
+BEGIN_MARK="-- BEGIN ${PLUGIN_ID}"
+END_MARK="-- END ${PLUGIN_ID}"
+
+die() { echo "unified-desks: $*" >&2; exit 1; }
+
+monitor_count() {
+  hyprctl monitors -j 2>/dev/null \
+    | jq '[.[] | select((.disabled // false) == false)] | length' 2>/dev/null || echo 0
+}
+
+backup_once() {
+  local file="$1" name
+  name="$(basename "$file")"
+  mkdir -p "${STATE_DIR}/originals"
+  if [[ -f "$file" && ! -f "${STATE_DIR}/originals/${name}" ]]; then
+    cp "$file" "${STATE_DIR}/originals/${name}"
+  fi
+  return 0
+}
+
+cmd_install() {
+  [[ -d "$HYPR_DIR" ]] || die "no ${HYPR_DIR} -- is this Omarchy?"
+  [[ -f "${PLUGIN_DIR}/hypr/unified-desks.lua" ]] \
+    || die "plugin payload missing at ${PLUGIN_DIR}/hypr/unified-desks.lua"
+
+  local count
+  count="$(monitor_count)"
+  if [[ "$count" != "2" ]]; then
+    echo "unified-desks: ${count} monitor(s) connected; this plugin is for exactly 2."
+    echo "unified-desks: installing anyway -- it stays inert until 2 are connected."
+  fi
+
+  backup_once "$HYPRLAND_LUA"
+  install -Dm644 "${PLUGIN_DIR}/hypr/unified-desks.lua" "$TARGET_LUA"
+
+  # Idempotent fenced require so re-running never stacks duplicates.
+  if ! grep -qF -- "$BEGIN_MARK" "$HYPRLAND_LUA" 2>/dev/null; then
+    {
+      echo ""
+      echo "$BEGIN_MARK"
+      echo 'require("hypr.unified-desks")'
+      echo "$END_MARK"
+    } >> "$HYPRLAND_LUA"
+  fi
+
+  write_standalone_restore
+  hyprctl reload >/dev/null 2>&1 || true
+  echo "unified-desks: installed"
+}
+
+# A self-contained restore helper that survives the plugin directory being
+# deleted, so `omarchy plugin remove` before `restore` is still recoverable.
+write_standalone_restore() {
+  mkdir -p "$STATE_DIR"
+  cat > "${STATE_DIR}/restore.sh" <<RESTORE
+#!/usr/bin/env bash
+# Standalone Unified Desks restore. Safe to run after the plugin is removed.
+set -euo pipefail
+HYPRLAND_LUA="${HYPRLAND_LUA}"
+TARGET_LUA="${TARGET_LUA}"
+BEGIN_MARK="${BEGIN_MARK}"
+END_MARK="${END_MARK}"
+
+if [[ -f "\$HYPRLAND_LUA" ]] && grep -qF -- "\$BEGIN_MARK" "\$HYPRLAND_LUA"; then
+  python3 - "\$HYPRLAND_LUA" "\$BEGIN_MARK" "\$END_MARK" <<'PY'
+import sys
+path, begin, end = sys.argv[1], sys.argv[2], sys.argv[3]
+lines = open(path, encoding="utf-8").read().splitlines()
+out, skipping = [], False
+for line in lines:
+    if not skipping and line.strip() == begin:
+        while out and out[-1].strip() == "":
+            out.pop()
+        skipping = True
+        continue
+    if skipping:
+        if line.strip() == end:
+            skipping = False
+        continue
+    out.append(line)
+open(path, "w", encoding="utf-8").write("\n".join(out) + "\n")
+PY
+fi
+
+rm -f "\$TARGET_LUA"
+hyprctl reload >/dev/null 2>&1 || true
+echo "unified-desks: restored"
+RESTORE
+  chmod +x "${STATE_DIR}/restore.sh" 2>/dev/null || true
+}
+
+cmd_restore() {
+  if [[ -f "$HYPRLAND_LUA" ]] && grep -qF -- "$BEGIN_MARK" "$HYPRLAND_LUA"; then
+    python3 "${PLUGIN_DIR}/scripts/strip-fence.py" \
+      "$HYPRLAND_LUA" "$BEGIN_MARK" "$END_MARK"
+  fi
+
+  rm -f "$TARGET_LUA"
+  hyprctl reload >/dev/null 2>&1 || true
+  echo "unified-desks: removed from Hyprland config (originals in ${STATE_DIR}/originals)"
+}
+
+cmd_switch() {
+  local desk="${1:-}"
+  [[ "$desk" =~ ^[1-5]$ ]] || die "switch needs a desk number 1-5"
+  hyprctl eval "o.unified_desks.switch_desk(${desk})" >/dev/null 2>&1
+}
+
+cmd_status() {
+  echo "monitors connected : $(monitor_count)"
+  echo "lua installed      : $([[ -f "$TARGET_LUA" ]] && echo yes || echo no)"
+  echo "hyprland.lua hook  : $(grep -qF -- "$BEGIN_MARK" "$HYPRLAND_LUA" 2>/dev/null && echo yes || echo no)"
+  echo "workspace rules    : $(hyprctl workspacerules -j 2>/dev/null | jq 'length' 2>/dev/null || echo '?')"
+}
+
+case "${1:-}" in
+  install) cmd_install ;;
+  restore) cmd_restore ;;
+  switch)  shift; cmd_switch "$@" ;;
+  status)  cmd_status ;;
+  *) die "usage: desks-ctl {install|restore|switch <1-5>|status}" ;;
+esac

@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#191a24"/>
+      <stop offset="100%" stop-color="#121219"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e2030"/>
+      <stop offset="100%" stop-color="#191b28"/>
+    </linearGradient>
+    <linearGradient id="link" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2ac3de" stop-opacity="0.15"/>
+      <stop offset="50%" stop-color="#2ac3de" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#2ac3de" stop-opacity="0.15"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+
+  <!-- title -->
+  <text x="960" y="132" text-anchor="middle" font-family="Adwaita Sans, Noto Sans, sans-serif"
+        font-size="76" font-weight="700" fill="#c8d3f5" letter-spacing="-1">Unified Desks</text>
+  <text x="960" y="192" text-anchor="middle" font-family="Adwaita Sans, Noto Sans, sans-serif"
+        font-size="36" fill="#7a83a8">Two monitors, one desktop.</text>
+
+  <!-- ============ LEFT MONITOR ============ -->
+  <g>
+    <rect x="180" y="286" width="700" height="392" rx="14" fill="url(#screen)" stroke="#2f3450" stroke-width="2"/>
+    <!-- bar strip -->
+    <rect x="182" y="288" width="696" height="52" rx="12" fill="#15161f"/>
+    <rect x="182" y="326" width="696" height="14" fill="#15161f"/>
+    <!-- desk pips: 3 is active -->
+    <text x="212" y="323" font-family="CaskaydiaMono Nerd Font, monospace" font-size="26" fill="#4d5478">1</text>
+    <text x="258" y="323" font-family="CaskaydiaMono Nerd Font, monospace" font-size="26" fill="#4d5478">2</text>
+    <circle cx="312" cy="314" r="11" fill="#2ac3de"/>
+    <text x="350" y="323" font-family="CaskaydiaMono Nerd Font, monospace" font-size="26" fill="#4d5478">4</text>
+    <text x="396" y="323" font-family="CaskaydiaMono Nerd Font, monospace" font-size="26" fill="#4d5478">5</text>
+    <!-- workspace label -->
+    <text x="530" y="530" text-anchor="middle" font-family="CaskaydiaMono Nerd Font, monospace"
+          font-size="96" font-weight="600" fill="#c8d3f5">ws 3</text>
+    <text x="530" y="592" text-anchor="middle" font-family="Adwaita Sans, Noto Sans, sans-serif"
+          font-size="28" fill="#6b7398">left screen</text>
+  </g>
+
+  <!-- ============ RIGHT MONITOR ============ -->
+  <g>
+    <rect x="1040" y="286" width="700" height="392" rx="14" fill="url(#screen)" stroke="#2f3450" stroke-width="2"/>
+    <rect x="1042" y="288" width="696" height="52" rx="12" fill="#15161f"/>
+    <rect x="1042" y="326" width="696" height="14" fill="#15161f"/>
+    <text x="1072" y="323" font-family="CaskaydiaMono Nerd Font, monospace" font-size="26" fill="#4d5478">1</text>
+    <text x="1118" y="323" font-family="CaskaydiaMono Nerd Font, monospace" font-size="26" fill="#4d5478">2</text>
+    <circle cx="1172" cy="314" r="11" fill="#2ac3de"/>
+    <text x="1210" y="323" font-family="CaskaydiaMono Nerd Font, monospace" font-size="26" fill="#4d5478">4</text>
+    <text x="1256" y="323" font-family="CaskaydiaMono Nerd Font, monospace" font-size="26" fill="#4d5478">5</text>
+    <text x="1390" y="530" text-anchor="middle" font-family="CaskaydiaMono Nerd Font, monospace"
+          font-size="96" font-weight="600" fill="#c8d3f5">ws 8</text>
+    <text x="1390" y="592" text-anchor="middle" font-family="Adwaita Sans, Noto Sans, sans-serif"
+          font-size="28" fill="#6b7398">right screen</text>
+  </g>
+
+  <!-- link between the two screens: they move as one -->
+  <rect x="240" y="744" width="1440" height="3" fill="url(#link)"/>
+  <circle cx="530" cy="745.5" r="7" fill="#2ac3de"/>
+  <circle cx="1390" cy="745.5" r="7" fill="#2ac3de"/>
+
+  <!-- keycap -->
+  <rect x="782" y="702" width="356" height="88" rx="16" fill="#1c2033" stroke="#2ac3de" stroke-width="2"/>
+  <text x="960" y="760" text-anchor="middle" font-family="CaskaydiaMono Nerd Font, monospace"
+        font-size="42" font-weight="600" fill="#2ac3de">SUPER + 3</text>
+
+  <!-- payoff -->
+  <text x="960" y="886" text-anchor="middle" font-family="Adwaita Sans, Noto Sans, sans-serif"
+        font-size="40" fill="#c8d3f5">One keypress moves <tspan font-weight="700">both</tspan> screens.</text>
+  <text x="960" y="944" text-anchor="middle" font-family="Adwaita Sans, Noto Sans, sans-serif"
+        font-size="28" fill="#6b7398">Five paired desks · each bar shows its own screen · for exactly two monitors</text>
+</svg>

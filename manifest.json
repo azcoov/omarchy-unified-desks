@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.azcoov.unified-desks",
+  "name": "Unified Desks",
+  "version": "0.1.0",
+  "author": "Billy Coover",
+  "license": "MIT",
+  "homepage": "https://github.com/azcoov/omarchy-unified-desks",
+  "description": "Two monitors, one desktop. SUPER+1-5 moves BOTH screens together to a paired set of workspaces, and each bar shows its own screen honestly. For exactly 2 monitors.",
+  "kinds": [
+    "bar-widget",
+    "service"
+  ],
+  "entryPoints": {
+    "barWidget": "Desks.qml",
+    "service": "Service.qml"
+  },
+  "barWidget": {
+    "displayName": "Unified Desks",
+    "description": "Five paired desks across two monitors. SUPER+1-5 or a click moves both screens at once; each bar reflects the screen it is drawn on.",
+    "category": "Compositor",
+    "defaultSection": "left",
+    "allowMultiple": false
+  }
+}
