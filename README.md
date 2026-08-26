@@ -2,6 +2,8 @@
 
 **Two monitors, one desktop.**
 
+![Two screens showing workspace 3 and workspace 8, the same desk highlighted on both bars, joined by a SUPER+3 keypress](preview.png)
+
 Every other multi-monitor workspace plugin for Omarchy splits your screens
 apart — each monitor gets its own independent workspaces. This one joins them.
 
