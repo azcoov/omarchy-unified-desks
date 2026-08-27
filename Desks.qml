@@ -23,22 +23,15 @@ BarWidget {
 
   // Desk count comes from the same one-line config file the Lua side reads, so
   // the bar and the keybindings can never disagree. Absent or invalid -> 5.
+  //
+  // This widget never opens that file, or any other predictable path, itself.
+  // Quickshell is one long-running process hosting the whole shell, so a path
+  // swapped for a FIFO would block it and an oversized file would exhaust it.
+  // scripts/read-state.py does the reading behind O_NONBLOCK | O_NOFOLLOW with
+  // fstat validation and capped reads, and hands back only this parsed state.
   readonly property int defaultDeskCount: 5
   property int deskCount: defaultDeskCount
   readonly property int requiredMonitors: 2
-
-  FileView {
-    path: Quickshell.env("HOME") + "/.config/omarchy/unified-desks.conf"
-    watchChanges: true
-    printErrors: false
-    onLoaded: {
-      var parsed = parseInt(String(text()).trim(), 10)
-      root.deskCount = (!isNaN(parsed) && parsed >= 1 && parsed <= 10)
-        ? parsed : root.defaultDeskCount
-    }
-    onLoadFailed: root.deskCount = root.defaultDeskCount
-    onFileChanged: reload()
-  }
 
   readonly property string ctl:
     Quickshell.env("HOME") + "/.config/omarchy/plugins/io.github.azcoov.unified-desks/scripts/desks-ctl"
@@ -137,18 +130,64 @@ BarWidget {
 
   property bool hyprInstalled: false
 
-  FileView {
-    path: Quickshell.env("HOME") + "/.config/hypr/unified-desks.lua"
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.hyprInstalled = true
-    onLoadFailed: root.hyprInstalled = false
-    onFileChanged: reload()
+  readonly property string reader:
+    Quickshell.env("HOME") + "/.config/omarchy/plugins/io.github.azcoov.unified-desks/scripts/read-state.py"
+
+  function applyState(raw) {
+    try {
+      var data = JSON.parse(String(raw))
+      var count = Number(data.desks)
+      root.deskCount = (count >= 1 && count <= 10) ? count : root.defaultDeskCount
+      root.hyprInstalled = data.installed === true
+    } catch (e) {
+      root.deskCount = root.defaultDeskCount
+      root.hyprInstalled = false
+    }
   }
+
+  function refreshState() {
+    if (!stateProc.running) stateProc.running = true
+  }
+
+  Process {
+    id: stateProc
+    command: ["python3", root.reader]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.applyState(text)
+    }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) {
+        root.deskCount = root.defaultDeskCount
+        root.hyprInstalled = false
+      }
+    }
+  }
+
+  // Polled rather than watched: a filesystem watch would mean holding these
+  // predictable paths open inside the shell process, which is the problem the
+  // helper exists to avoid. The state changes rarely, so this is cheap.
+  Timer {
+    interval: 10000
+    running: true
+    repeat: true
+    onTriggered: root.refreshState()
+  }
+
+  Component.onCompleted: root.refreshState()
 
   function runSetup() {
     if (!root.bar) return
     root.bar.run("bash " + Util.shellQuote(root.ctl) + " install")
+    setupSettle.restart()
+  }
+
+  // Setup runs detached, so re-read shortly after to flip the widget over.
+  Timer {
+    id: setupSettle
+    interval: 1200
+    repeat: false
+    onTriggered: root.refreshState()
   }
 
   // --- layout -------------------------------------------------------------
