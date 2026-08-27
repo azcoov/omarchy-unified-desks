@@ -8,10 +8,53 @@ HYPR_DIR="${HOME}/.config/hypr"
 STATE_DIR="${HOME}/.local/state/${PLUGIN_ID}"
 TARGET_LUA="${HYPR_DIR}/unified-desks.lua"
 HYPRLAND_LUA="${HYPR_DIR}/hyprland.lua"
+PAYLOAD_LUA="${PLUGIN_DIR}/hypr/unified-desks.lua"
 BEGIN_MARK="-- BEGIN ${PLUGIN_ID}"
 END_MARK="-- END ${PLUGIN_ID}"
 
 die() { echo "unified-desks: $*" >&2; exit 1; }
+
+# --- safe filesystem helpers -------------------------------------------------
+#
+# Every path this plugin owns lives at a predictable, world-known location, so a
+# plain `> "$dest"` redirect would follow a symlink planted there and clobber
+# whatever it points at. These helpers refuse to write through a symlink or any
+# non-regular file, and publish content by atomic rename into the destination
+# directory, so a swap racing the write cannot redirect it either.
+
+# A directory this plugin owns: must not be a symlink.
+ensure_own_dir() {
+  local dir="$1"
+  [[ -L "$dir" ]] && die "refusing to use ${dir}: it is a symlink"
+  mkdir -p "$dir"
+  [[ -d "$dir" ]] || die "not a directory: ${dir}"
+  return 0
+}
+
+# safe_write <dest> [mode]   -- content on stdin
+safe_write() {
+  local dest="$1" mode="${2:-0644}" dir tmp
+  dir="$(dirname "$dest")"
+  ensure_own_dir "$dir"
+
+  [[ -L "$dest" ]] && die "refusing to write ${dest}: it is a symlink"
+  if [[ -e "$dest" && ! -f "$dest" ]]; then
+    die "refusing to write ${dest}: not a regular file"
+  fi
+
+  tmp="$(mktemp "${dir}/.unified-desks.XXXXXXXX")" || die "cannot create temp file in ${dir}"
+  cat >"$tmp"
+  chmod "$mode" "$tmp"
+  mv -f "$tmp" "$dest"
+}
+
+# True when dest is missing or differs from the given content file.
+needs_update() {
+  local src="$1" dest="$2"
+  [[ -L "$dest" ]] && return 0          # symlink: safe_write will reject it loudly
+  [[ -f "$dest" ]] || return 0
+  ! cmp -s "$src" "$dest"
+}
 
 monitor_count() {
   hyprctl monitors -j 2>/dev/null \
@@ -21,19 +64,20 @@ monitor_count() {
 backup_once() {
   local file="$1" name
   name="$(basename "$file")"
-  mkdir -p "${STATE_DIR}/originals"
-  if [[ -f "$file" && ! -f "${STATE_DIR}/originals/${name}" ]]; then
-    cp "$file" "${STATE_DIR}/originals/${name}"
+  ensure_own_dir "${STATE_DIR}/originals"
+  if [[ -f "$file" && ! -e "${STATE_DIR}/originals/${name}" ]]; then
+    safe_write "${STATE_DIR}/originals/${name}" 0644 <"$file"
   fi
   return 0
 }
 
+# --- commands ----------------------------------------------------------------
+
 cmd_install() {
   [[ -d "$HYPR_DIR" ]] || die "no ${HYPR_DIR} -- is this Omarchy?"
-  [[ -f "${PLUGIN_DIR}/hypr/unified-desks.lua" ]] \
-    || die "plugin payload missing at ${PLUGIN_DIR}/hypr/unified-desks.lua"
+  [[ -f "$PAYLOAD_LUA" ]] || die "plugin payload missing at ${PAYLOAD_LUA}"
 
-  local count
+  local count changed=0
   count="$(monitor_count)"
   if [[ "$count" != "2" ]]; then
     echo "unified-desks: ${count} monitor(s) connected; this plugin is for exactly 2."
@@ -41,28 +85,46 @@ cmd_install() {
   fi
 
   backup_once "$HYPRLAND_LUA"
-  install -Dm644 "${PLUGIN_DIR}/hypr/unified-desks.lua" "$TARGET_LUA"
+
+  # Only touch the filesystem when something actually differs. The shell runs
+  # this on every start, and a no-op start should write nothing at all.
+  if needs_update "$PAYLOAD_LUA" "$TARGET_LUA"; then
+    safe_write "$TARGET_LUA" 0644 <"$PAYLOAD_LUA"
+    changed=1
+  fi
 
   # Idempotent fenced require so re-running never stacks duplicates.
   if ! grep -qF -- "$BEGIN_MARK" "$HYPRLAND_LUA" 2>/dev/null; then
+    [[ -L "$HYPRLAND_LUA" && ! -e "$HYPRLAND_LUA" ]] \
+      && die "refusing to append to ${HYPRLAND_LUA}: broken symlink"
     {
       echo ""
       echo "$BEGIN_MARK"
       echo 'require("hypr.unified-desks")'
       echo "$END_MARK"
-    } >> "$HYPRLAND_LUA"
+    } >>"$HYPRLAND_LUA"
+    changed=1
   fi
 
-  write_standalone_restore
-  hyprctl reload >/dev/null 2>&1 || true
-  echo "unified-desks: installed"
+  write_standalone_restore && changed=1
+
+  if (( changed )); then
+    hyprctl reload >/dev/null 2>&1 || true
+    echo "unified-desks: installed"
+  else
+    echo "unified-desks: already up to date"
+  fi
 }
 
 # A self-contained restore helper that survives the plugin directory being
 # deleted, so `omarchy plugin remove` before `restore` is still recoverable.
+# Returns 0 only when it actually rewrote the file.
 write_standalone_restore() {
-  mkdir -p "$STATE_DIR"
-  cat > "${STATE_DIR}/restore.sh" <<RESTORE
+  local target="${STATE_DIR}/restore.sh" tmp
+  ensure_own_dir "$STATE_DIR"
+
+  tmp="$(mktemp "${STATE_DIR}/.unified-desks.XXXXXXXX")" || die "cannot create temp file in ${STATE_DIR}"
+  cat >"$tmp" <<RESTORE
 #!/usr/bin/env bash
 # Standalone Unified Desks restore. Safe to run after the plugin is removed.
 set -euo pipefail
@@ -96,7 +158,21 @@ rm -f "\$TARGET_LUA"
 hyprctl reload >/dev/null 2>&1 || true
 echo "unified-desks: restored"
 RESTORE
-  chmod +x "${STATE_DIR}/restore.sh" 2>/dev/null || true
+
+  if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$tmp" "$target"; then
+    rm -f "$tmp"
+    return 1
+  fi
+
+  [[ -L "$target" ]] && { rm -f "$tmp"; die "refusing to write ${target}: it is a symlink"; }
+  if [[ -e "$target" && ! -f "$target" ]]; then
+    rm -f "$tmp"
+    die "refusing to write ${target}: not a regular file"
+  fi
+
+  chmod 0755 "$tmp"
+  mv -f "$tmp" "$target"
+  return 0
 }
 
 cmd_restore() {

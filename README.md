@@ -57,6 +57,13 @@ cannot straddle the bezel while tiled.
 Originals are copied to `~/.local/state/io.github.azcoov.unified-desks/originals/` before
 anything is touched.
 
+Every file the plugin owns sits at a predictable path, so all of them are written
+through a helper that **refuses to follow a symlink** (or any non-regular file)
+and publishes content by atomic rename into the destination directory — a symlink
+planted at one of those paths cannot redirect a write, and neither can one swapped
+in mid-write. Installation is also content-addressed: if nothing differs, nothing
+is written, so an ordinary shell start touches no files at all.
+
 ### Keybindings
 
 | Key | Action |
