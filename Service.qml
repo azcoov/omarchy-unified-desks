@@ -1,10 +1,13 @@
 import QtQuick
 import Quickshell
-import Quickshell.Io
 
-// Installs the Hyprland side of Unified Desks and keeps it in step with the
-// plugin payload. Everything it writes is fenced or restorable; see
-// scripts/desks-ctl restore.
+// Unified Desks service.
+//
+// This deliberately performs NO filesystem work. Earlier revisions ran
+// `desks-ctl install` on every shell start, which meant the plugin wrote to
+// ~/.config/hypr on startup with no user action behind it. Setup is now an
+// explicit click on the bar widget, so nothing outside the plugin directory is
+// touched until someone asks for it.
 Item {
   id: root
 
@@ -12,9 +15,6 @@ Item {
   property var manifest: null
   property var shell: null
   property var component: null
-
-  readonly property string ctl:
-    Quickshell.env("HOME") + "/.config/omarchy/plugins/io.github.azcoov.unified-desks/scripts/desks-ctl"
 
   function registerWidget() {
     if (!root.barWidgetRegistry || !root.manifest) return
@@ -26,21 +26,6 @@ Item {
     }
   }
 
-  // Runs desks-ctl install on every shell start. It is idempotent: the Lua file
-  // is refreshed from the plugin payload and the hyprland.lua hook is only
-  // appended when absent, so a plugin update picks up new logic automatically.
-  // Invoked through bash rather than relying on the executable bit, which some
-  // archive downloads strip.
-  Process {
-    id: installProc
-    command: ["bash", root.ctl, "install"]
-    running: false
-  }
-
-  Component.onCompleted: {
-    registerWidget()
-    installProc.running = true
-  }
-
+  Component.onCompleted: registerWidget()
   onBarWidgetRegistryChanged: registerWidget()
 }

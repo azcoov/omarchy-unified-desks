@@ -94,17 +94,24 @@ cmd_install() {
   fi
 
   # Idempotent fenced require so re-running never stacks duplicates.
-  if ! grep -qF -- "$BEGIN_MARK" "$HYPRLAND_LUA" 2>/dev/null; then
-    [[ -L "$HYPRLAND_LUA" && ! -e "$HYPRLAND_LUA" ]] \
-      && die "refusing to append to ${HYPRLAND_LUA}: broken symlink"
-    {
-      echo ""
-      echo "$BEGIN_MARK"
-      echo 'require("hypr.unified-desks")'
-      echo "$END_MARK"
-    } >>"$HYPRLAND_LUA"
-    changed=1
-  fi
+  #
+  # This runs through append-fence.py rather than a `>>` redirect. A redirect
+  # resolves the path at open time and follows any symlink sitting there, and
+  # testing with `[[ -L ]]` first is a time-of-check/time-of-use race. The
+  # helper opens once with O_NOFOLLOW, which refuses a symlink in the same
+  # syscall, and does the "already present?" check on that same descriptor.
+  local rc=0
+  python3 "${PLUGIN_DIR}/scripts/append-fence.py" \
+    "$HYPRLAND_LUA" "$BEGIN_MARK" "$END_MARK" 'require("hypr.unified-desks")' || rc=$?
+  case "$rc" in
+    0) changed=1 ;;
+    3) : ;;  # already present
+    4) die "refusing to modify ${HYPRLAND_LUA}: it is a symlink.
+   If you keep hyprland.lua in a dotfiles repo, add this line to the real file:
+       require(\"hypr.unified-desks\")" ;;
+    5) die "cannot modify ${HYPRLAND_LUA}: missing or not a regular file" ;;
+    *) die "failed to update ${HYPRLAND_LUA} (append-fence exit ${rc})" ;;
+  esac
 
   write_standalone_restore && changed=1
 
@@ -133,27 +140,53 @@ TARGET_LUA="${TARGET_LUA}"
 BEGIN_MARK="${BEGIN_MARK}"
 END_MARK="${END_MARK}"
 
-if [[ -f "\$HYPRLAND_LUA" ]] && grep -qF -- "\$BEGIN_MARK" "\$HYPRLAND_LUA"; then
-  python3 - "\$HYPRLAND_LUA" "\$BEGIN_MARK" "\$END_MARK" <<'PY'
-import sys
+python3 - "\$HYPRLAND_LUA" "\$BEGIN_MARK" "\$END_MARK" <<'PY'
+# Opened once with O_NOFOLLOW so a symlink planted at this path is refused
+# rather than followed, and rewritten through the same descriptor.
+import errno, os, stat, sys
 path, begin, end = sys.argv[1], sys.argv[2], sys.argv[3]
-lines = open(path, encoding="utf-8").read().splitlines()
-out, skipping = [], False
-for line in lines:
-    if not skipping and line.strip() == begin:
-        while out and out[-1].strip() == "":
-            out.pop()
-        skipping = True
-        continue
-    if skipping:
-        if line.strip() == end:
-            skipping = False
-        continue
-    out.append(line)
-open(path, "w", encoding="utf-8").write("\n".join(out) + "\n")
+try:
+    fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+except OSError as exc:
+    if exc.errno == errno.ELOOP:
+        sys.exit("refusing to modify %s: it is a symlink" % path)
+    if exc.errno == errno.ENOENT:
+        sys.exit(0)
+    raise
+try:
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        sys.exit("refusing to modify %s: not a regular file" % path)
+    data = b""
+    while True:
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            break
+        data += chunk
+    out, skipping, removed = [], False, False
+    for line in data.decode("utf-8").splitlines():
+        if not skipping and line.strip() == begin:
+            while out and out[-1].strip() == "":
+                out.pop()
+            skipping, removed = True, True
+            continue
+        if skipping:
+            if line.strip() == end:
+                skipping = False
+            continue
+        out.append(line)
+    if removed:
+        payload = ("\n".join(out) + "\n").encode("utf-8")
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(fd, payload)
+        os.ftruncate(fd, len(payload))
+finally:
+    os.close(fd)
 PY
-fi
 
+if [[ -L "\$TARGET_LUA" ]]; then
+  echo "unified-desks: refusing to remove \$TARGET_LUA: it is a symlink" >&2
+  exit 1
+fi
 rm -f "\$TARGET_LUA"
 hyprctl reload >/dev/null 2>&1 || true
 echo "unified-desks: restored"
@@ -176,11 +209,21 @@ RESTORE
 }
 
 cmd_restore() {
-  if [[ -f "$HYPRLAND_LUA" ]] && grep -qF -- "$BEGIN_MARK" "$HYPRLAND_LUA"; then
-    python3 "${PLUGIN_DIR}/scripts/strip-fence.py" \
-      "$HYPRLAND_LUA" "$BEGIN_MARK" "$END_MARK"
-  fi
+  local rc=0
+  python3 "${PLUGIN_DIR}/scripts/strip-fence.py" \
+    "$HYPRLAND_LUA" "$BEGIN_MARK" "$END_MARK" || rc=$?
+  case "$rc" in
+    0) : ;;
+    4) die "refusing to modify ${HYPRLAND_LUA}: it is a symlink.
+   Remove this line from the real file by hand:
+       require(\"hypr.unified-desks\")" ;;
+    5) : ;;  # nothing there to clean up
+    *) die "failed to clean ${HYPRLAND_LUA} (strip-fence exit ${rc})" ;;
+  esac
 
+  if [[ -L "$TARGET_LUA" ]]; then
+    die "refusing to remove ${TARGET_LUA}: it is a symlink"
+  fi
   rm -f "$TARGET_LUA"
   hyprctl reload >/dev/null 2>&1 || true
   echo "unified-desks: removed from Hyprland config (originals in ${STATE_DIR}/originals)"

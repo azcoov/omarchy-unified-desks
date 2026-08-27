@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Io
 import Quickshell.Hyprland
 import qs.Commons
 import qs.Ui
@@ -113,18 +114,63 @@ BarWidget {
     root.bar.run("bash " + Util.shellQuote(root.ctl) + " switch " + desk)
   }
 
+  // --- setup state --------------------------------------------------------
+  //
+  // The plugin writes nothing on startup. Until someone clicks the setup pill
+  // below, ~/.config/hypr is untouched.
+
+  property bool hyprInstalled: false
+
+  FileView {
+    path: Quickshell.env("HOME") + "/.config/hypr/unified-desks.lua"
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.hyprInstalled = true
+    onLoadFailed: root.hyprInstalled = false
+    onFileChanged: reload()
+  }
+
+  function runSetup() {
+    if (!root.bar) return
+    root.bar.run("bash " + Util.shellQuote(root.ctl) + " install")
+  }
+
   // --- layout -------------------------------------------------------------
 
   readonly property real trailingGap: root.vertical ? 0 : Style.spaceReal(1.5)
 
-  implicitWidth: (root.supported ? grid.implicitWidth : notice.implicitWidth) + trailingGap
-  implicitHeight: root.supported ? grid.implicitHeight : notice.implicitHeight
+  // Three states: needs setup, wrong monitor count, or the desks themselves.
+  readonly property bool showDesks: root.hyprInstalled && root.supported
+  readonly property bool showNotice: root.hyprInstalled && !root.supported
 
-  // Shown when the machine does not have exactly two monitors. The Lua side
-  // stays inert in that case, so stock workspace keys still work.
+  implicitWidth: (root.showDesks ? grid.implicitWidth
+                                 : (root.showNotice ? notice.implicitWidth : setup.implicitWidth))
+                 + trailingGap
+  implicitHeight: root.showDesks ? grid.implicitHeight
+                                 : (root.showNotice ? notice.implicitHeight : setup.implicitHeight)
+
+  // Shown until the user opts in. Clicking runs desks-ctl install -- the only
+  // thing that ever writes outside the plugin directory.
+  WidgetButton {
+    id: setup
+    visible: !root.hyprInstalled
+    bar: root.bar
+    text: "\uDB85\uDCFB Set up desks"
+    horizontalMargin: 6
+    verticalPadding: 6
+    fixedHeight: root.barSize
+    tooltipText: "Click to set up Unified Desks. This installs "
+                 + "~/.config/hypr/unified-desks.lua and adds one fenced require() line "
+                 + "to hyprland.lua, backing up the original first. Nothing outside this "
+                 + "plugin is touched until you click."
+    onPressed: function() { root.runSetup() }
+  }
+
+  // Shown when set up but the machine does not have exactly two monitors. The
+  // Lua side stays inert in that case, so stock workspace keys still work.
   WidgetButton {
     id: notice
-    visible: !root.supported
+    visible: root.showNotice
     bar: root.bar
     text: "\uDB85\uDCFB 2✕"
     opacity: 0.5
@@ -137,7 +183,7 @@ BarWidget {
 
   GridLayout {
     id: grid
-    visible: root.supported
+    visible: root.showDesks
     anchors.fill: parent
     anchors.rightMargin: root.trailingGap
     columns: root.vertical ? 1 : root.deskIds().length
@@ -145,7 +191,7 @@ BarWidget {
     rowSpacing: root.vertical ? Style.space(2) : 0
 
     Repeater {
-      model: root.supported ? root.deskIds() : []
+      model: root.showDesks ? root.deskIds() : []
 
       WidgetButton {
         required property int modelData

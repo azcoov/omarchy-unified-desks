@@ -48,21 +48,41 @@ cannot straddle the bezel while tiled.
 
 ## What it changes
 
+**Nothing, until you ask.** Installing the plugin only adds its bar widget. The
+widget shows a **Set up desks** button; until you click it, nothing outside the
+plugin's own directory is touched — a shell start writes no files at all.
+
+Clicking it performs the one-time setup:
+
 | File | Change |
 |---|---|
 | `~/.config/hypr/unified-desks.lua` | Installed from the plugin payload |
-| `~/.config/hypr/hyprland.lua` | One fenced `require()` block |
+| `~/.config/hypr/hyprland.lua` | One fenced `require()` block, appended |
 | Bar | Adds the Unified Desks widget |
 
 Originals are copied to `~/.local/state/io.github.azcoov.unified-desks/originals/` before
 anything is touched.
 
-Every file the plugin owns sits at a predictable path, so all of them are written
-through a helper that **refuses to follow a symlink** (or any non-regular file)
-and publishes content by atomic rename into the destination directory — a symlink
-planted at one of those paths cannot redirect a write, and neither can one swapped
-in mid-write. Installation is also content-addressed: if nothing differs, nothing
-is written, so an ordinary shell start touches no files at all.
+Every path this plugin writes is predictable, which makes it a target for a
+planted symlink. None of them are written with a plain shell redirect:
+
+- Files the plugin owns (`unified-desks.lua`, the backups, `restore.sh`) go
+  through a helper that refuses a symlink or non-regular destination and
+  publishes by atomic rename from a temporary file **inside the destination
+  directory**, so a symlink swapped in mid-write cannot redirect it either.
+- `hyprland.lua` is opened once with `O_NOFOLLOW`, which makes the kernel refuse
+  a symlink in the same syscall as the open. Testing the path first and then
+  redirecting would be a time-of-check/time-of-use race; this has no such window.
+  The "is the fence already there?" check runs on that same descriptor.
+
+Setup is also content-addressed: if nothing differs, nothing is written.
+
+**If you keep `hyprland.lua` in a dotfiles repo** as a symlink, setup will refuse
+to touch it and tell you so. Add the line yourself to the real file:
+
+```lua
+require("hypr.unified-desks")
+```
 
 ### Keybindings
 
@@ -109,7 +129,12 @@ omarchy plugin add https://github.com/azcoov/omarchy-unified-desks.git --enable
 ```
 
 Then put the widget in your bar — it defaults to the left section, replacing the
-stock workspace indicator.
+stock workspace indicator — and click **Set up desks** on it once. That click is
+the only thing that writes to `~/.config/hypr`.
+
+After updating the plugin, click it again (or run `desks-ctl install`) to refresh
+the Hyprland side; it is idempotent and reports `already up to date` when there is
+nothing to do.
 
 ## Uninstall
 
