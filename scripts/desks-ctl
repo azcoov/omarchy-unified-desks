@@ -9,6 +9,8 @@ STATE_DIR="${HOME}/.local/state/${PLUGIN_ID}"
 TARGET_LUA="${HYPR_DIR}/unified-desks.lua"
 HYPRLAND_LUA="${HYPR_DIR}/hyprland.lua"
 PAYLOAD_LUA="${PLUGIN_DIR}/hypr/unified-desks.lua"
+CONFIG_FILE="${HOME}/.config/omarchy/unified-desks.conf"
+DEFAULT_DESKS=5
 BEGIN_MARK="-- BEGIN ${PLUGIN_ID}"
 END_MARK="-- END ${PLUGIN_ID}"
 
@@ -230,12 +232,22 @@ cmd_restore() {
 }
 
 cmd_switch() {
+  # Range is 1..10 because the desk count is configurable; the Lua side rejects
+  # anything above the configured count, so validate only the shape here.
   local desk="${1:-}"
-  [[ "$desk" =~ ^[1-5]$ ]] || die "switch needs a desk number 1-5"
+  [[ "$desk" =~ ^([1-9]|10)$ ]] || die "switch needs a desk number 1-10"
   hyprctl eval "o.unified_desks.switch_desk(${desk})" >/dev/null 2>&1
 }
 
 cmd_status() {
+  local desks="${DEFAULT_DESKS}"
+  if [[ -f "$CONFIG_FILE" ]]; then
+    local raw
+    raw="$(head -n1 "$CONFIG_FILE" 2>/dev/null | tr -dc '0-9')"
+    if [[ -n "$raw" ]] && (( raw >= 1 && raw <= 10 )); then desks="$raw"; fi
+  fi
+  echo "desks              : ${desks} (ws 1-${desks} left, $((desks + 1))-$((desks * 2)) right)"
+  echo "config file        : $([[ -f "$CONFIG_FILE" ]] && echo "$CONFIG_FILE" || echo "none (default ${DEFAULT_DESKS})")"
   echo "monitors connected : $(monitor_count)"
   echo "lua installed      : $([[ -f "$TARGET_LUA" ]] && echo yes || echo no)"
   echo "hyprland.lua hook  : $(grep -qF -- "$BEGIN_MARK" "$HYPRLAND_LUA" 2>/dev/null && echo yes || echo no)"

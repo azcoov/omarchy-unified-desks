@@ -8,18 +8,45 @@
 -- and moves both monitors together, so a two-monitor rig behaves like one
 -- desktop rather than two independent screens.
 --
+-- With the default five desks:
+--
 --   SUPER + 1  ->  left = ws 1   right = ws 6
 --   SUPER + 2  ->  left = ws 2   right = ws 7
 --   ...
 --   SUPER + 5  ->  left = ws 5   right = ws 10
+--
+-- The desk count is configurable in ~/.config/omarchy/unified-desks.conf --
+-- a single number from 1 to 10. Desk N is always workspace N on the left and
+-- workspace N + <count> on the right.
 --
 -- TWO MONITORS ONLY. With any other count this module disables itself and
 -- leaves Omarchy's stock workspace bindings untouched.
 
 local M = {}
 
-local DESKS = 5 -- desks; also the offset between a desk's two halves
+local DEFAULT_DESKS = 5
+local MAX_DESKS = 10
+local NUMBER_KEYS = 10 -- SUPER+1..0 is all the keyboard gives us
 local REQUIRED_MONITORS = 2
+
+-- Desk count is read from an optional one-line config file. Absent, unreadable
+-- or out of range all fall back to the default, so a bad edit degrades to
+-- working defaults rather than a broken keymap.
+local CONFIG_PATH = (os.getenv("HOME") or "") .. "/.config/omarchy/unified-desks.conf"
+
+local function read_desk_count()
+  local file = io.open(CONFIG_PATH, "r")
+  if not file then return DEFAULT_DESKS end
+
+  local line = file:read("*l")
+  file:close()
+
+  local count = tonumber(line and line:match("^%s*(%d+)"))
+  if not count or count < 1 or count > MAX_DESKS then return DEFAULT_DESKS end
+  return count
+end
+
+local DESKS = read_desk_count() -- desks; also the offset between a desk's halves
 
 -- Hyprland reports position as either a table or a packed value depending on
 -- version, so normalise before sorting monitors left-to-right.
@@ -174,33 +201,40 @@ o.unified_desks = M
 
 M.apply_workspace_rules()
 
--- Every workspace key is rebound, including 6..0 -- those are the right-hand
--- halves of a desk, so pressing one takes you to the desk that contains it
--- rather than desynchronising the pair or sitting there dead.
+-- Iterate the ten number keys, NOT the workspace range. Those are the only keys
+-- Omarchy binds (SUPER + code:10..19 -> workspaces 1..10), and with more than
+-- five desks the workspace range runs past them: at eight desks, workspaces
+-- 11..16 would map to code:20..25, which is `-`, `=`, backspace, tab, q, w.
 --
--- Binding unconditionally (rather than only when two monitors are present)
--- is deliberate: the handlers fall back to stock behaviour when the desk model
--- is unavailable, so unplugging a monitor degrades gracefully instead of
--- leaving the machine with no workspace keys.
+-- A key is claimed only when its workspace belongs to a desk. Any key beyond
+-- 2 x DESKS keeps Omarchy's stock binding, so a smaller desk count simply
+-- leaves the spare number keys alone.
 --
--- Omarchy binds SUPER + code:10..19 to workspaces 1..10. Hyprland fires *every*
--- bind registered on a chord, so stock binds must be removed first.
-for ws = 1, DESKS * REQUIRED_MONITORS do
-  local key = "code:" .. tostring(ws + 9)
-  local desk = M.desk_of(ws)
-  local left_ws, right_ws = M.workspaces_for(desk)
-  local label = "Desk " .. desk .. " (ws " .. left_ws .. " + ws " .. right_ws .. ")"
+-- Binding regardless of monitor count is deliberate: the handlers fall back to
+-- stock behaviour when the desk model is unavailable, so unplugging a monitor
+-- degrades gracefully instead of leaving the machine with no workspace keys.
+--
+-- Hyprland fires *every* bind registered on a chord, so stock binds are removed
+-- before ours are added.
+for key_number = 1, NUMBER_KEYS do
+  local desk = M.desk_of(key_number)
 
-  hl.unbind("SUPER + " .. key)
-  o.bind("SUPER + " .. key, label, function() M.focus_workspace(ws) end)
+  if desk then
+    local key = "code:" .. tostring(key_number + 9)
+    local left_ws, right_ws = M.workspaces_for(desk)
+    local label = "Desk " .. desk .. " (ws " .. left_ws .. " + ws " .. right_ws .. ")"
 
-  hl.unbind("SUPER + SHIFT + " .. key)
-  o.bind("SUPER + SHIFT + " .. key, "Move window to desk " .. desk,
-    function() M.move_window(ws, true) end)
+    hl.unbind("SUPER + " .. key)
+    o.bind("SUPER + " .. key, label, function() M.focus_workspace(key_number) end)
 
-  hl.unbind("SUPER + SHIFT + ALT + " .. key)
-  o.bind("SUPER + SHIFT + ALT + " .. key, "Move window silently to desk " .. desk,
-    function() M.move_window(ws, false) end)
+    hl.unbind("SUPER + SHIFT + " .. key)
+    o.bind("SUPER + SHIFT + " .. key, "Move window to desk " .. desk,
+      function() M.move_window(key_number, true) end)
+
+    hl.unbind("SUPER + SHIFT + ALT + " .. key)
+    o.bind("SUPER + SHIFT + ALT + " .. key, "Move window silently to desk " .. desk,
+      function() M.move_window(key_number, false) end)
+  end
 end
 
 -- Re-pin workspaces when displays change. Switching itself resolves monitors

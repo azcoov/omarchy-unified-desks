@@ -102,6 +102,50 @@ which is exactly the confusion this plugin removes.
 workspace N, so pressing it on the right monitor would fling the window to the
 left screen. Here it targets whichever half of the desk you are already on.
 
+### Choosing how many desks
+
+Five is the default, using workspaces 1–10. If you want three, or eight, write a
+single number to `~/.config/omarchy/unified-desks.conf`:
+
+```bash
+echo 3 > ~/.config/omarchy/unified-desks.conf
+hyprctl reload
+```
+
+Desk N is always workspace **N** on the left screen and workspace **N + count**
+on the right. So the layout follows from the number you pick:
+
+| Desks | Left screen | Right screen | Keys used |
+|---|---|---|---|
+| 3 | ws 1–3 | ws 4–6 | `SUPER+1`–`6` |
+| 5 *(default)* | ws 1–5 | ws 6–10 | `SUPER+1`–`0` |
+| 8 | ws 1–8 | ws 9–16 | `SUPER+1`–`0` |
+
+Valid values are **1 to 10**. Anything missing, unparseable, or out of range
+falls back to five rather than leaving you with a broken keymap.
+
+Both the keybindings and the bar widget read this same file, so they cannot
+disagree, and the widget picks up a change without a restart.
+
+**Fewer than five desks** leaves the spare number keys alone — at three desks,
+`SUPER+7`…`SUPER+0` keep Omarchy's stock behaviour and switch to plain
+workspaces 7–10.
+
+**More than five desks** needs more workspaces than the number row has keys. At
+eight desks the right-hand halves are workspaces 9–16, and only the desk keys
+`SUPER+1`–`8` matter; `SUPER+9` and `SUPER+0` land on desks 1 and 2, because a
+workspace key always takes you to the desk that contains it. Every desk stays
+reachable from the number row.
+
+> **Changing the count later:** Hyprland assigns a workspace to a monitor when
+> that workspace is *created*, so workspaces that already exist keep whichever
+> screen they are on. Switch from five desks to eight and workspace 7 — which
+> used to be a right-hand half — is still sitting on the right monitor even
+> though it is now a left-hand one. Empty workspaces sort themselves out as soon
+> as they are destroyed and recreated; for ones holding windows, move the windows
+> off, or just log out and back in. Easiest is to pick your count before you fill
+> the desks up.
+
 ### Losing a monitor
 
 All ten keys stay bound whatever the monitor count. If a display is unplugged,

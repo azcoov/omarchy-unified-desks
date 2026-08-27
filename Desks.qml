@@ -21,8 +21,24 @@ BarWidget {
   id: root
   moduleName: "io.github.azcoov.unified-desks"
 
-  readonly property int deskCount: 5
+  // Desk count comes from the same one-line config file the Lua side reads, so
+  // the bar and the keybindings can never disagree. Absent or invalid -> 5.
+  readonly property int defaultDeskCount: 5
+  property int deskCount: defaultDeskCount
   readonly property int requiredMonitors: 2
+
+  FileView {
+    path: Quickshell.env("HOME") + "/.config/omarchy/unified-desks.conf"
+    watchChanges: true
+    printErrors: false
+    onLoaded: {
+      var parsed = parseInt(String(text()).trim(), 10)
+      root.deskCount = (!isNaN(parsed) && parsed >= 1 && parsed <= 10)
+        ? parsed : root.defaultDeskCount
+    }
+    onLoadFailed: root.deskCount = root.defaultDeskCount
+    onFileChanged: reload()
+  }
 
   readonly property string ctl:
     Quickshell.env("HOME") + "/.config/omarchy/plugins/io.github.azcoov.unified-desks/scripts/desks-ctl"
