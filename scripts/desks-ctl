@@ -246,7 +246,7 @@ cmd_status() {
     raw="$(head -n1 "$CONFIG_FILE" 2>/dev/null | tr -dc '0-9')"
     if [[ -n "$raw" ]] && (( raw >= 1 && raw <= 10 )); then desks="$raw"; fi
   fi
-  echo "desks              : ${desks} (ws 1-${desks} left, $((desks + 1))-$((desks * 2)) right)"
+  echo "desks              : ${desks} (workspaces 1-${desks} of each monitor's block)"
   echo "config file        : $([[ -f "$CONFIG_FILE" ]] && echo "$CONFIG_FILE" || echo "none (default ${DEFAULT_DESKS})")"
   echo "monitors connected : $(monitor_count)"
   echo "lua installed      : $([[ -f "$TARGET_LUA" ]] && echo yes || echo no)"

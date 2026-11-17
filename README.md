@@ -8,16 +8,26 @@ Every other multi-monitor workspace plugin for Omarchy splits your screens
 apart — each monitor gets its own independent workspaces. This one joins them.
 
 `SUPER+1` … `SUPER+5` move **both** monitors at once. A *desk* is a pair of
-workspaces: the left screen gets workspace N, the right gets N+5. Switch a desk
-and your whole two-screen scene changes together, instead of one half of it.
+workspaces: workspace N of the left screen and workspace N of the right. Switch
+a desk and your whole two-screen scene changes together, instead of one half of
+it.
+
+Omarchy gives each monitor its own block of ten workspace ids, so in Hyprland's
+numbering a desk looks like this:
 
 ```
-SUPER+1  ->  left: ws 1    right: ws 6
-SUPER+2  ->  left: ws 2    right: ws 7
-SUPER+3  ->  left: ws 3    right: ws 8
-SUPER+4  ->  left: ws 4    right: ws 9
-SUPER+5  ->  left: ws 5    right: ws 10
+SUPER+1  ->  left: ws 1    right: ws 11
+SUPER+2  ->  left: ws 2    right: ws 12
+SUPER+3  ->  left: ws 3    right: ws 13
+SUPER+4  ->  left: ws 4    right: ws 14
+SUPER+5  ->  left: ws 5    right: ws 15
 ```
+
+Omarchy decides which monitor owns which block, and the plugin asks it rather
+than assuming, so on some machines the left screen holds 11 to 15 and the right
+1 to 5. Both halves of a desk always sit in their own monitor's block. That
+matters because Omarchy renumbers any workspace it finds outside its monitor's
+block on every config reload, and every theme change reloads the config.
 
 ## ⚠ For exactly two monitors
 
@@ -89,14 +99,13 @@ require("hypr.unified-desks")
 | Key | Action |
 |---|---|
 | `SUPER + 1..5` | Switch both monitors to desks 1–5 |
-| `SUPER + 6..0` | Switch to the desk that workspace belongs to (6→desk 1 … 0→desk 5) |
+| `SUPER + 6..0` | Also switch desks 1 to 5 (6→desk 1 … 0→desk 5) |
 | `SUPER + SHIFT + N` | Move window to that desk, on the screen it is already on |
 | `SUPER + SHIFT + ALT + N` | Same, without following it |
 
-Any workspace key takes you to the **desk containing that workspace**, so
-`SUPER+7` and `SUPER+2` both land on desk 2. Workspaces 6–10 are the right-hand
-halves of a desk, and reaching one on its own would desynchronise the pair —
-which is exactly the confusion this plugin removes.
+Every number key lands on a desk, so `SUPER+7` and `SUPER+2` both switch to
+desk 2. No key reaches half a desk on its own, because that would desynchronise
+the pair, which is exactly the confusion this plugin removes.
 
 `SUPER + SHIFT + N` is rebound for a reason: the stock binding always targets
 workspace N, so pressing it on the right monitor would fling the window to the
@@ -104,22 +113,22 @@ left screen. Here it targets whichever half of the desk you are already on.
 
 ### Choosing how many desks
 
-Five is the default, using workspaces 1–10. If you want three, or eight, write a
-single number to `~/.config/omarchy/unified-desks.conf`:
+Five is the default. If you want three, or eight, write a single number to
+`~/.config/omarchy/unified-desks.conf`:
 
 ```bash
 echo 3 > ~/.config/omarchy/unified-desks.conf
 hyprctl reload
 ```
 
-Desk N is always workspace **N** on the left screen and workspace **N + count**
-on the right. So the layout follows from the number you pick:
+Desk N is always workspace **N** of each monitor's block, so the count only
+decides how many desks there are and which number keys they claim:
 
 | Desks | Left screen | Right screen | Keys used |
 |---|---|---|---|
-| 3 | ws 1–3 | ws 4–6 | `SUPER+1`–`6` |
-| 5 *(default)* | ws 1–5 | ws 6–10 | `SUPER+1`–`0` |
-| 8 | ws 1–8 | ws 9–16 | `SUPER+1`–`0` |
+| 3 | ws 1 to 3 | ws 11 to 13 | `SUPER+1` to `6` |
+| 5 *(default)* | ws 1 to 5 | ws 11 to 15 | `SUPER+1` to `0` |
+| 8 | ws 1 to 8 | ws 11 to 18 | `SUPER+1` to `0` |
 
 Valid values are **1 to 10**. Anything missing, unparseable, or out of range
 falls back to five rather than leaving you with a broken keymap.
@@ -127,24 +136,13 @@ falls back to five rather than leaving you with a broken keymap.
 Both the keybindings and the bar widget read this same file, so they cannot
 disagree, and the widget picks up a change without a restart.
 
-**Fewer than five desks** leaves the spare number keys alone — at three desks,
-`SUPER+7`…`SUPER+0` keep Omarchy's stock behaviour and switch to plain
-workspaces 7–10.
+**Fewer than five desks** leaves the spare number keys alone. At three desks,
+`SUPER+7`…`SUPER+0` keep Omarchy's stock behaviour and switch the focused
+monitor to its own workspaces 7 to 10.
 
-**More than five desks** needs more workspaces than the number row has keys. At
-eight desks the right-hand halves are workspaces 9–16, and only the desk keys
-`SUPER+1`–`8` matter; `SUPER+9` and `SUPER+0` land on desks 1 and 2, because a
-workspace key always takes you to the desk that contains it. Every desk stays
-reachable from the number row.
-
-> **Changing the count later:** Hyprland assigns a workspace to a monitor when
-> that workspace is *created*, so workspaces that already exist keep whichever
-> screen they are on. Switch from five desks to eight and workspace 7 — which
-> used to be a right-hand half — is still sitting on the right monitor even
-> though it is now a left-hand one. Empty workspaces sort themselves out as soon
-> as they are destroyed and recreated; for ones holding windows, move the windows
-> off, or just log out and back in. Easiest is to pick your count before you fill
-> the desks up.
+**More than five desks** leaves fewer keys to wrap round. At eight desks,
+`SUPER+1` to `8` switch desks 1 to 8, and `SUPER+9` and `SUPER+0` switch desks 1
+and 2. Every desk stays reachable from the number row.
 
 ### Losing a monitor
 
@@ -215,6 +213,13 @@ alongside plugins that claim the same ground:
 
 Reports monitor count, whether the Lua file and hook are installed, and how many
 workspace rules are active.
+
+**Right-hand desks are empty after changing themes.** Omarchy 4.5 and later
+renumbers any workspace sitting outside its monitor's block on every config
+reload, and versions of this plugin before 0.3.0 kept the right-hand halves on
+workspaces 6 to 10. Update the plugin and run `desks-ctl install`. Windows that
+were already renumbered stay on workspaces 16 to 20 until you log out and back
+in.
 
 If the bar reverts to showing ten workspaces, another plugin reclaimed the
 widget slot — set the left widget id back to `io.github.azcoov.unified-desks` in

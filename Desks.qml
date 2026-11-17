@@ -8,9 +8,10 @@ import qs.Ui
 
 // Unified Desks bar widget -- TWO MONITORS ONLY.
 //
-// Shows 5 desks instead of 10 workspaces. A desk is a pair: left = ws N,
-// right = ws N + 5. Clicking one moves both monitors together, exactly as
-// SUPER+N does.
+// Shows 5 desks instead of 10 workspaces. A desk is a pair: workspace N of
+// each monitor's block of ten (ws N on the left, ws 10 + N on the right with
+// Omarchy's usual blocks). Clicking one moves both monitors together, exactly
+// as SUPER+N does.
 //
 // Omarchy's stock widget highlights Hyprland.focusedWorkspace, which is a
 // GLOBAL value, so every monitor's bar draws the same cell regardless of what
@@ -78,17 +79,26 @@ BarWidget {
 
   // --- desk state ---------------------------------------------------------
 
-  function workspaceById(id) {
-    var values = Hyprland.workspaces.values
-    for (var i = 0; i < values.length; i++) {
-      if (values[i].id === id) return values[i]
-    }
-    return null
+  // Omarchy numbers each monitor's workspaces in a block of ten (1-10, 11-20,
+  // ...), and desk N is the Nth workspace of each block, so a workspace's desk
+  // is its place in its block. This holds whichever block a monitor owns, so
+  // the widget never needs to know the block assignment itself.
+  readonly property int slots: 10
+
+  function deskOf(id) {
+    if (id <= 0) return 0
+    var slot = (id - 1) % root.slots + 1
+    return slot <= root.deskCount ? slot : 0
   }
 
-  function occupiedById(id) {
-    var ws = workspaceById(id)
-    return ws !== null && ws.toplevels.values.length > 0
+  // A desk counts as occupied if either half holds windows.
+  function deskOccupied(desk) {
+    var values = Hyprland.workspaces.values
+    for (var i = 0; i < values.length; i++) {
+      var ws = values[i]
+      if (ws.id > 0 && root.deskOf(ws.id) === desk && ws.toplevels.values.length > 0) return true
+    }
+    return false
   }
 
   // Workspace shown on THIS bar's monitor, falling back to the global focused
@@ -105,12 +115,8 @@ BarWidget {
     return fw ? Number(fw.id) : 0
   }
 
-  // ws 1..5 -> desk 1..5; ws 6..10 -> desk 1..5.
-  readonly property int activeDesk: {
-    var id = root.monitorWorkspaceId
-    if (id <= 0) return 0
-    return id > root.deskCount ? id - root.deskCount : id
-  }
+  // ws 1..5 -> desk 1..5; ws 11..15 -> desk 1..5.
+  readonly property int activeDesk: root.deskOf(root.monitorWorkspaceId)
 
   function deskIds() {
     var ids = []
@@ -251,9 +257,7 @@ BarWidget {
       WidgetButton {
         required property int modelData
 
-        // A desk counts as occupied if either half holds windows.
-        readonly property bool occupied: root.occupiedById(modelData)
-                                         || root.occupiedById(modelData + root.deskCount)
+        readonly property bool occupied: root.deskOccupied(modelData)
         readonly property bool focused: root.activeDesk === modelData
 
         bar: root.bar
@@ -263,8 +267,7 @@ BarWidget {
         verticalPadding: 6
         fixedWidth: root.vertical ? root.barSize : Style.space(20)
         fixedHeight: root.barSize
-        tooltipText: "Desk " + modelData + "  (ws " + modelData
-                     + " + ws " + (modelData + root.deskCount) + ")"
+        tooltipText: "Desk " + modelData + " on both monitors"
         onPressed: function() { root.switchDesk(modelData) }
       }
     }

@@ -8,16 +8,22 @@
 -- and moves both monitors together, so a two-monitor rig behaves like one
 -- desktop rather than two independent screens.
 --
--- With the default five desks:
+-- Omarchy gives every monitor its own block of ten workspace ids -- 1-10 on
+-- one, 11-20 on the next -- and on every config reload, which every theme
+-- change performs, it renumbers any workspace it finds on a monitor outside
+-- that monitor's block. So desk N is workspace N *of each monitor's block*:
 --
---   SUPER + 1  ->  left = ws 1   right = ws 6
---   SUPER + 2  ->  left = ws 2   right = ws 7
+--   SUPER + 1  ->  left = ws 1   right = ws 11
+--   SUPER + 2  ->  left = ws 2   right = ws 12
 --   ...
---   SUPER + 5  ->  left = ws 5   right = ws 10
+--   SUPER + 5  ->  left = ws 5   right = ws 15
+--
+-- Which monitor owns which block is Omarchy's call, so the ids are always asked
+-- of it rather than assumed. An Omarchy without per-monitor workspaces gets the
+-- same layout: left 1-10, right 11-20.
 --
 -- The desk count is configurable in ~/.config/omarchy/unified-desks.conf --
--- a single number from 1 to 10. Desk N is always workspace N on the left and
--- workspace N + <count> on the right.
+-- a single number from 1 to 10.
 --
 -- TWO MONITORS ONLY. With any other count this module disables itself and
 -- leaves Omarchy's stock workspace bindings untouched.
@@ -28,6 +34,15 @@ local DEFAULT_DESKS = 5
 local MAX_DESKS = 10
 local NUMBER_KEYS = 10 -- SUPER+1..0 is all the keyboard gives us
 local REQUIRED_MONITORS = 2
+local SLOTS = 10 -- workspace ids in each monitor's block
+
+-- Omarchy's per-monitor workspaces (default/hypr/monitor-workspaces.lua), which
+-- Omarchy loads before this file. Nil on an Omarchy that predates them.
+local omarchy = o.workspaces
+if type(omarchy) ~= "table" or type(omarchy.workspace_id) ~= "function"
+  or type(omarchy.focus) ~= "function" or type(omarchy.move_window) ~= "function" then
+  omarchy = nil
+end
 
 -- Desk count is read from an optional one-line config file. Absent, unreadable
 -- or out of range all fall back to the default, so a bad edit degrades to
@@ -80,16 +95,29 @@ function M.active()
   return #M.ordered_monitors() == REQUIRED_MONITORS
 end
 
--- Desk N occupies workspace N on the left monitor and N + DESKS on the right.
-function M.workspaces_for(desk)
-  return desk, desk + DESKS
+-- The workspace id of a desk on one monitor of the pair: side 1 is the left
+-- monitor, side 2 the right. A desk must sit inside each monitor's own block,
+-- or Omarchy's next reload renumbers it out from under the desk.
+function M.workspace_on(monitors, side, desk)
+  if omarchy then
+    return omarchy.workspace_id(monitors[side], desk)
+  end
+  return (side - 1) * SLOTS + desk
 end
 
--- Which desk a workspace id belongs to, or nil if it is outside the range.
-function M.desk_of(workspace_id)
-  if workspace_id < 1 or workspace_id > DESKS * REQUIRED_MONITORS then return nil end
-  if workspace_id > DESKS then return workspace_id - DESKS end
-  return workspace_id
+-- Desk N's two workspaces, left then right.
+function M.workspaces_for(desk, monitors)
+  monitors = monitors or M.ordered_monitors()
+  return M.workspace_on(monitors, 1, desk), M.workspace_on(monitors, 2, desk)
+end
+
+-- The desk a number key (1 to 10) switches to, or nil when the key is left to
+-- Omarchy. Keys past the desk count wrap round once, so with five desks
+-- SUPER+6..0 reach desks 1..5 as well.
+function M.desk_for_key(key_number)
+  if key_number < 1 or key_number > DESKS * REQUIRED_MONITORS then return nil end
+  if key_number > DESKS then return key_number - DESKS end
+  return key_number
 end
 
 -- Pin each half of a desk to its monitor. Without this a workspace can be
@@ -101,7 +129,7 @@ function M.apply_workspace_rules()
   local left, right = monitors[1].name, monitors[2].name
 
   for desk = 1, DESKS do
-    local left_ws, right_ws = M.workspaces_for(desk)
+    local left_ws, right_ws = M.workspaces_for(desk, monitors)
     hl.workspace_rule({ workspace = tostring(left_ws), monitor = left, default = (desk == 1) })
     hl.workspace_rule({ workspace = tostring(right_ws), monitor = right, default = (desk == 1) })
   end
@@ -116,7 +144,7 @@ function M.switch_desk(desk)
 
   local monitors = M.ordered_monitors()
   local left, right = monitors[1].name, monitors[2].name
-  local left_ws, right_ws = M.workspaces_for(desk)
+  local left_ws, right_ws = M.workspaces_for(desk, monitors)
 
   local focused = hl.get_active_monitor()
   local return_to = focused and focused.name or left
@@ -141,53 +169,81 @@ function M.move_to_desk(desk, follow)
   if desk < 1 or desk > DESKS then return end
 
   local monitors = M.ordered_monitors()
-  local left_ws, right_ws = M.workspaces_for(desk)
-
   local focused = hl.get_active_monitor()
-  local target = left_ws
+  local side = 1
   if focused and focused.name == monitors[2].name then
-    target = right_ws
+    side = 2
   end
 
+  local target = M.workspace_on(monitors, side, desk)
   hl.dispatch(hl.dsp.window.move({ workspace = tostring(target), follow = follow ~= false }))
 end
 
 -- ---------------------------------------------------------------------------
 -- Key handlers
 --
--- These always fall back to plain per-workspace behaviour when the desk model
--- is unavailable (monitor unplugged, docked, wrong count). The stock workspace
--- binds are replaced at load, so without this fallback losing a monitor would
--- leave the machine with no working workspace keys at all.
+-- These always fall back to stock behaviour when the desk model is unavailable
+-- (monitor unplugged, docked, wrong count). The stock workspace binds are
+-- replaced at load, so without this fallback losing a monitor would leave the
+-- machine with no working workspace keys at all.
+--
+-- Stock means Omarchy's own number-key actions: with per-monitor workspaces,
+-- SUPER+3 is the third workspace of the focused monitor's block, not workspace
+-- 3. They are built once, here, because every call to o.workspaces.focus()
+-- registers another action with Omarchy's keybindings menu.
 -- ---------------------------------------------------------------------------
 
-function M.focus_workspace(workspace_id)
+local stock = {}
+if omarchy then
+  for number = 1, NUMBER_KEYS do
+    stock[number] = {
+      focus = omarchy.focus(number),
+      move = omarchy.move_window(number),
+      move_silently = omarchy.move_window(number, false),
+    }
+  end
+end
+
+function M.focus_workspace(number)
   if M.active() then
-    local desk = M.desk_of(workspace_id)
+    local desk = M.desk_for_key(number)
     if desk then
       M.switch_desk(desk)
       return
     end
   end
 
-  hl.dispatch(hl.dsp.focus({ workspace = tostring(workspace_id) }))
+  if stock[number] then
+    stock[number].focus()
+    return
+  end
+
+  hl.dispatch(hl.dsp.focus({ workspace = tostring(number) }))
 end
 
-function M.move_window(workspace_id, follow)
+function M.move_window(number, follow)
   if M.active() then
-    local desk = M.desk_of(workspace_id)
+    local desk = M.desk_for_key(number)
     if desk then
       M.move_to_desk(desk, follow)
       return
     end
   end
 
+  if stock[number] then
+    if follow == false then
+      stock[number].move_silently()
+    else
+      stock[number].move()
+    end
+    return
+  end
+
   hl.dispatch(hl.dsp.window.move({
-    workspace = tostring(workspace_id),
+    workspace = tostring(number),
     follow = follow ~= false,
   }))
 end
-
 
 -- ---------------------------------------------------------------------------
 -- Wiring
@@ -201,14 +257,13 @@ o.unified_desks = M
 
 M.apply_workspace_rules()
 
--- Iterate the ten number keys, NOT the workspace range. Those are the only keys
--- Omarchy binds (SUPER + code:10..19 -> workspaces 1..10), and with more than
--- five desks the workspace range runs past them: at eight desks, workspaces
--- 11..16 would map to code:20..25, which is `-`, `=`, backspace, tab, q, w.
+-- Iterate the ten number keys, which are the only keys Omarchy binds to
+-- workspaces (SUPER + code:10..19). Deriving keycodes from desk or workspace
+-- numbers instead would run past the number row onto `-`, `=`, backspace, tab.
 --
--- A key is claimed only when its workspace belongs to a desk. Any key beyond
--- 2 x DESKS keeps Omarchy's stock binding, so a smaller desk count simply
--- leaves the spare number keys alone.
+-- A key is claimed only when it maps to a desk. Any key beyond 2 x DESKS keeps
+-- Omarchy's stock binding, so a smaller desk count simply leaves the spare
+-- number keys alone.
 --
 -- Binding regardless of monitor count is deliberate: the handlers fall back to
 -- stock behaviour when the desk model is unavailable, so unplugging a monitor
@@ -217,12 +272,11 @@ M.apply_workspace_rules()
 -- Hyprland fires *every* bind registered on a chord, so stock binds are removed
 -- before ours are added.
 for key_number = 1, NUMBER_KEYS do
-  local desk = M.desk_of(key_number)
+  local desk = M.desk_for_key(key_number)
 
   if desk then
     local key = "code:" .. tostring(key_number + 9)
-    local left_ws, right_ws = M.workspaces_for(desk)
-    local label = "Desk " .. desk .. " (ws " .. left_ws .. " + ws " .. right_ws .. ")"
+    local label = "Switch both monitors to desk " .. desk
 
     hl.unbind("SUPER + " .. key)
     o.bind("SUPER + " .. key, label, function() M.focus_workspace(key_number) end)
